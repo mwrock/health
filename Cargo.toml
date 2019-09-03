@@ -1,0 +1,12 @@
+[package]
+name = "health"
+version = "0.1.0"
+authors = ["mwrock <matt@mattwrock.com>"]
+edition = "2018"
+
+[dependencies]
+habitat_core = { path = "c:/dev/habitat/components/core" }
+winapi = { version = "0.3.7", features = ["winbase", "winerror"] }
+mio-named-pipes = "*"
+mio = "*"
+retry = "*"
