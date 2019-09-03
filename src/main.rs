@@ -11,48 +11,62 @@ use mio::{Poll, Ready, Token, PollOpt, Events};
 use std::os::windows::fs::*;
 use std::os::windows::io::*;
 use std::io::prelude::*;
-use std::str;
 use winapi::um::winbase;
 use winapi::shared::winerror::ERROR_PIPE_BUSY;
 use retry::{delay, retry};
 
 fn main() {
     println!("Welcome and enjoy your health checker POC!");
-    println!("Type 'h' to check health. Type 'q' to quit.");
+    println!("Type enter to check health.");
 
-    let mut input_buf = [0; 1];
-    let mut client = HealthClient::new();
+    let mut client = HealthHook::new();
 
     loop {
-        if io::stdin().read_exact(&mut input_buf).is_ok() {
-            if !client.is_connected() {
-                println!("lost server, creating new client.");
-                client = HealthClient::new();
-            }
-            match str::from_utf8(&input_buf) {
-                Ok("h") => {
-                    let exit_status = client.check_health();
-                    println!("server returned exit code {}", exit_status);
-                },
-                Ok("q") => {
-                    client.quit();
-                    break;
-                },
-                _ => {},
+        if io::stdin().read_line(&mut String::new()).is_ok() {
+            let exit_status = client.check_health();
+            println!("server returned exit code {}", exit_status);
+        }
+    }
+}
+
+struct HealthHook {
+    client: Option<PipeClient>,
+}
+
+impl HealthHook {
+    pub fn new() -> Self {
+        Self { client: None }
+    }
+
+    pub fn check_health(&mut self) -> i32 {
+        match self.client {
+            Some(ref mut c) => {
+                if c.is_connected() {
+                    c.check_health()
+                } else {
+                    let mut c = PipeClient::new();
+                    let ret = c.check_health();
+                    self.client = Some(c);
+                    ret
+                }
+            },
+            None => {
+                let mut c = PipeClient::new();
+                let ret = c.check_health();
+                self.client = Some(c);
+                ret
             }
         }
     }
-
-    println!("Good Bye");
 }
 
-struct HealthClient {
+struct PipeClient {
     pipe: NamedPipe,
     poll: Poll,
     events: Events,
 }
 
-impl HealthClient {
+impl PipeClient {
     pub fn new() -> Self {
         let events = Events::with_capacity(1024);
         let args = vec!["-NonInteractive", "-file", "c:/dev/health/src/server.ps1"];
@@ -112,14 +126,8 @@ impl HealthClient {
         i32::from_ne_bytes(exit_buf)
     }
 
-    pub fn quit(&mut self) {
-        println!("Telling pipe server to quit...");
-        self.poll.poll(&mut self.events, None).unwrap();
-        self.pipe.write("\n".as_bytes()).unwrap();
-    }
-
     pub fn is_connected(&self) -> bool {
-        if let Err(err) = HealthClient::pipe_file() {
+        if let Err(err) = PipeClient::pipe_file() {
             if err.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) {
                 return true
             }
@@ -135,6 +143,14 @@ impl HealthClient {
         opts.open("\\\\.\\pipe\\rust-ipc-bdd62f4b-2d3f-409c-a82d-5530be2ae8a1") 
     }
 
+}
+
+impl Drop for PipeClient {
+    fn drop(&mut self) {
+        println!("Telling pipe server to quit...");
+        self.poll.poll(&mut self.events, None).unwrap();
+        self.pipe.write("\n".as_bytes()).unwrap();
+    }
 }
 
 fn pipe_stdout<T>(out: T)
