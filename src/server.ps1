@@ -11,9 +11,6 @@ Write-Host "Starting PS pipe server with PID $PID"
 try {
     $np = new-object System.IO.Pipes.NamedPipeServerStream('rust-ipc-bdd62f4b-2d3f-409c-a82d-5530be2ae8a1', [System.IO.Pipes.PipeDirection]::InOut)
     Write-Host "Named pipe created. Waiting for connection..."
-    $np.WaitForConnection()
-    Write-Host "client connected"
-    $pipeReader = new-object System.IO.StreamReader($np)
     $running = $true
  
     $origEnv = @{}
@@ -22,9 +19,13 @@ try {
     }
 
     while($running) {
-        $line = $pipeReader.ReadLine()
-        if(Test-path $line) {
-            & $line
+        $np.WaitForConnection()
+        write-host "pipe is connected"
+        $byte = $np.ReadByte()
+        write-host "i have read a byte"
+        if($byte -eq 1) {
+            Write-host "checking health..."
+            & "c:/dev/health/src/hook.ps1"
             $np.Write([System.BitConverter]::GetBytes($LASTEXITCODE), 0, 4)
             $np.Flush()
             Write-Host "Before restore: ${env:blah}"
@@ -35,6 +36,7 @@ try {
             Write-Host "no file given. quitting."
             $running = $false
         }
+        $np.Disconnect()
     }
 } finally {
     $np.Dispose()
